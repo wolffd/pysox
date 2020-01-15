@@ -14,7 +14,7 @@ ENCODING_VALS = [
 ]
 
 
-def sox(args):
+def sox(args, pipe_audio=None):
     '''Pass an argument list to SoX.
 
     Parameters
@@ -37,12 +37,16 @@ def sox(args):
     try:
         logger.info("Executing: %s", ' '.join(args))
 
+        # if pipe_audio is not None:
         process_handle = subprocess.Popen(
-            args, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
+        
+        out, err = process_handle.communicate(input=pipe_audio.read())
+        
+        if pipe_audio is None:
+            out = out.decode("utf-8")
 
-        out, err = process_handle.communicate()
-        out = out.decode("utf-8")
         err = err.decode("utf-8")
 
         status = process_handle.returncode

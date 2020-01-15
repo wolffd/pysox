@@ -11,6 +11,11 @@ from .log import logger
 import random
 import os
 
+from io import BytesIO
+import numpy as np
+from scipy.io import wavfile
+
+
 from .core import ENCODING_VALS
 from .core import is_number
 from .core import play
@@ -133,7 +138,7 @@ class Transformer(object):
         self.globals = global_args
         return self
 
-    def set_input_format(self, file_type=None, rate=None, bits=None,
+    def set_input_format(self, file_type='wav', rate=None, bits=None,
                          channels=None, encoding=None, ignore_length=False):
         '''Sets input file format arguments. This is primarily useful when
         dealing with audio files without a file extension. Overwrites any
@@ -231,7 +236,9 @@ class Transformer(object):
 
         input_format = []
 
-        if file_type is not None:
+        if file_type!='wav':
+            raise NotImplementedError('Only .wav fprmat supported for piping')
+        else:
             input_format.extend(['-t', '{}'.format(file_type)])
 
         if rate is not None:
@@ -252,7 +259,7 @@ class Transformer(object):
         self.input_format = input_format
         return self
 
-    def set_output_format(self, file_type=None, rate=None, bits=None,
+    def set_output_format(self, file_type='wav', rate=None, bits=None,
                           channels=None, encoding=None, comments=None,
                           append_comments=True):
         '''Sets output file format arguments. These arguments will overwrite
@@ -356,7 +363,10 @@ class Transformer(object):
         output_format = []
 
         if file_type is not None:
-            output_format.extend(['-t', '{}'.format(file_type)])
+            if file_type!='wav':
+                raise NotImplementedError('Only .wav fprmat supported for piping')
+            else:
+                output_format.extend(['-t', '{}'.format(file_type)])
 
         if rate is not None:
             output_format.extend(['-r', '{:f}'.format(rate)])
@@ -387,18 +397,18 @@ class Transformer(object):
         self.effects_log = list()
         return self
 
-    def build(self, input_filepath, output_filepath, extra_args=None,
+    def build(self, input_audio, output_filepath, extra_args=None,
               return_output=False):
         '''Builds the output_file by executing the current set of commands.
 
         Parameters
         ----------
-        input_filepath : str
-            Path to input audio file.
+        input_audio : str or np.array
+            Path to input audio file or audio data.
         output_filepath : str or None
             Path to desired output file. If a file already exists at the given
             path, the file will be overwritten.
-            If None, no file will be created.
+            If None, output audio will be returned within the "out" variable
         extra_args : list or None, default=None
             If a list is given, these additional arguments are passed to SoX
             at the end of the list of effects.
@@ -409,14 +419,26 @@ class Transformer(object):
             Otherwise returns True on success.
 
         '''
-        file_info.validate_input_file(input_filepath)
+        
+        pipe_audio = None
+        sample_rate = 44100
+        if isinstance(input_audio, str):
+            file_info.validate_input_file(input_audio)
+            input_filepath = input_audio
+        else:
+            if len(input_audio.shape) !=2:
+                raise ValueError('In pipe_audio mode, audio is expected in the form nsamples x nchannels.')
+            pipe_audio = BytesIO()
+            wavfile.write( pipe_audio, sample_rate, np.array(np.array(input_audio), dtype=np.float32) )
+            input_filepath = '-'
+            output_filepath = '-'
 
         if output_filepath is not None:
             file_info.validate_output_file(output_filepath)
         else:
             output_filepath = '-n'
 
-        if input_filepath == output_filepath:
+        if pipe_audio is not None and (input_audio == output_filepath):
             raise ValueError(
                 "input_filepath must be different from output_filepath."
             )
@@ -434,7 +456,7 @@ class Transformer(object):
                 raise ValueError("extra_args must be a list.")
             args.extend(extra_args)
 
-        status, out, err = sox(args)
+        status, out, err = sox(args, pipe_audio)
 
         if status != 0:
             raise SoxError(
@@ -446,8 +468,13 @@ class Transformer(object):
                 output_filepath,
                 " ".join(self.effects_log)
             )
-            if out is not None:
+            if pipe_audio is not None:
+                output_wav_stream = BytesIO(out)
+                sample_rate_out, out = wavfile.read(output_wav_stream)
+                
+            elif out is not None:
                 logger.info("[SoX] {}".format(out))
+                
 
             if return_output:
                 return status, out, err
