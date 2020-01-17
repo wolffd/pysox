@@ -62,6 +62,26 @@ class Transformer(object):
         self.input_format = []
         self.output_format = []
         
+        self.pipe_audio_formats_supported = {
+            'file_type':['raw','wav'], 
+            'bits':[32,16],
+            'channels':[1,2],
+            'encoding':['integer','signed-integer','floating-point']
+            }
+        self.reset_pipe_audio_format_input()
+        self.reset_pipe_audio_format_output()
+        
+        self.effects = []
+        self.effects_log = []
+
+        self.globals = []
+        self.set_globals()
+                
+
+        
+
+        
+    def reset_pipe_audio_format_output(self):
         self.pipe_audio_format_output = {
             'file_type':None,
             'rate':None, 
@@ -69,20 +89,15 @@ class Transformer(object):
             'channels':None,
             'encoding':None
             }
-        self.pipe_audio_format_input = self.pipe_audio_format_output
         
-        self.pipe_audio_formats_supported = {
-            'file_type':['raw','wav'], 
-            'bits':[32,16],
-            'channels':[1,2],
-            'encoding':['integer','signed-integer','floating-point']
+    def reset_pipe_audio_format_input(self):
+        self.pipe_audio_format_input = {
+            'file_type':None,
+            'rate':None, 
+            'bits':None,
+            'channels':None,
+            'encoding':None
             }
-
-        self.effects = []
-        self.effects_log = []
-
-        self.globals = []
-        self.set_globals()
 
     def set_globals(self, dither=False, guard=False, multithread=False,
                     replay_gain=False, verbosity=2):
@@ -250,7 +265,7 @@ class Transformer(object):
             raise ValueError('ignore_length must be a boolean')
 
         input_format = []
-        
+        self.reset_pipe_audio_format_input()
 
         if file_type is not None:
             input_format.extend(['-t', '{}'.format(file_type)])
@@ -380,6 +395,7 @@ class Transformer(object):
             raise ValueError('append_comments must be a boolean')
 
         output_format = []
+        self.reset_pipe_audio_format_output()
 
         if file_type is not None:
             output_format.extend(['-t', '{}'.format(file_type)])
@@ -437,12 +453,13 @@ class Transformer(object):
         return in_type
     
     def pipe_check_audio_formats( self, pipe_audio_format ):
+        
         for k in self.pipe_audio_formats_supported.keys():
             if k not in pipe_audio_format.keys():
-                raise Exception('ERROR: Format info %s not specified' % str(k) )
-                # return False
+                raise Exception('ERROR: Format option %s required for piping but not specified' % str(k) )
+                # return False 
             if pipe_audio_format[k] not in self.pipe_audio_formats_supported[k]:
-                raise Exception('ERROR: Format %s not supported' % str(pipe_audio_format[k]) )
+                raise Exception('ERROR: Format %s not supported for option %s in pipe mode. ' % (str(pipe_audio_format[k]), str(k)) )
                 # return False
         return True
 
