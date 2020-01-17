@@ -34,7 +34,6 @@ class Transformer(object):
     file, saved to output_filepath.
 
 
-
     Methods
     -------
     set_globals
@@ -62,6 +61,22 @@ class Transformer(object):
         '''
         self.input_format = []
         self.output_format = []
+        
+        self.pipe_audio_format_output = {
+            'file_type':None,
+            'rate':None, 
+            'bits':None,
+            'channels':None,
+            'encoding':None
+            }
+        self.pipe_audio_format_input = self.pipe_audio_format_output
+        
+        self.pipe_audio_formats_supported = {
+            'file_type':['raw','wav'], 
+            'bits':[32,16],
+            'channels':[1,2],
+            'encoding':['integer','signed-integer','floating-point']
+            }
 
         self.effects = []
         self.effects_log = []
@@ -138,7 +153,7 @@ class Transformer(object):
         self.globals = global_args
         return self
 
-    def set_input_format(self, file_type='wav', rate=None, bits=None,
+    def set_input_format(self, file_type=None, rate=None, bits=None,
                          channels=None, encoding=None, ignore_length=False):
         '''Sets input file format arguments. This is primarily useful when
         dealing with audio files without a file extension. Overwrites any
@@ -235,23 +250,27 @@ class Transformer(object):
             raise ValueError('ignore_length must be a boolean')
 
         input_format = []
+        
 
-        if file_type!='wav':
-            raise NotImplementedError('Only .wav fprmat supported for piping')
-        else:
+        if file_type is not None:
             input_format.extend(['-t', '{}'.format(file_type)])
+            self.pipe_audio_format_input['file_type'] = file_type
 
         if rate is not None:
             input_format.extend(['-r', '{:f}'.format(rate)])
+            self.pipe_audio_format_input['rate'] = rate
 
         if bits is not None:
             input_format.extend(['-b', '{}'.format(bits)])
-
+            self.pipe_audio_format_input['bits'] = bits
+            
         if channels is not None:
             input_format.extend(['-c', '{}'.format(channels)])
+            self.pipe_audio_format_input['channels'] = channels
 
         if encoding is not None:
             input_format.extend(['-e', '{}'.format(encoding)])
+            self.pipe_audio_format_input['encoding'] = encoding
 
         if ignore_length:
             input_format.append('--ignore-length')
@@ -363,22 +382,24 @@ class Transformer(object):
         output_format = []
 
         if file_type is not None:
-            if file_type!='wav':
-                raise NotImplementedError('Only .wav fprmat supported for piping')
-            else:
-                output_format.extend(['-t', '{}'.format(file_type)])
+            output_format.extend(['-t', '{}'.format(file_type)])
+            self.pipe_audio_format_output['file_type'] = file_type
 
         if rate is not None:
             output_format.extend(['-r', '{:f}'.format(rate)])
+            self.pipe_audio_format_output['rate'] = rate
 
         if bits is not None:
             output_format.extend(['-b', '{}'.format(bits)])
+            self.pipe_audio_format_output['bits'] = bits
 
         if channels is not None:
             output_format.extend(['-c', '{}'.format(channels)])
+            self.pipe_audio_format_output['channels'] = channels
 
         if encoding is not None:
             output_format.extend(['-e', '{}'.format(encoding)])
+            self.pipe_audio_format_output['encoding'] = encoding
 
         if comments is not None:
             if append_comments:
@@ -396,6 +417,34 @@ class Transformer(object):
         self.effects = list()
         self.effects_log = list()
         return self
+    
+    def pipe_get_audio_encoding(self, pipe_audio_format):
+        in_type = None
+        if pipe_audio_format['encoding']=='floating-point':
+            if pipe_audio_format['bits']==32:
+                in_type = np.float32
+            else:
+                raise NotImplementedError('Audio format not implemented for piping. Provide a string for input_audio if you want to write to a file instead.')
+        elif pipe_audio_format['encoding']=='signed-integer':
+            if pipe_audio_format['bits']==16:
+                in_type = np.int16
+            elif pipe_audio_format['bits']==32:
+                in_type = np.int32
+            else:
+                raise NotImplementedError('Audio format not implemented for piping. Provide a string for input_audio if you want to write to a file instead.')
+        else:
+            raise NotImplementedError('Audio format not implemented for piping. Provide a string for input_audio if you want to write to a file instead.')
+        return in_type
+    
+    def pipe_check_audio_formats( self, pipe_audio_format ):
+        for k in self.pipe_audio_formats_supported.keys():
+            if k not in pipe_audio_format.keys():
+                raise Exception('ERROR: Format info %s not specified' % str(k) )
+                # return False
+            if pipe_audio_format[k] not in self.pipe_audio_formats_supported[k]:
+                raise Exception('ERROR: Format %s not supported' % str(pipe_audio_format[k]) )
+                # return False
+        return True
 
     def build(self, input_audio, output_filepath, extra_args=None,
               return_output=False):
@@ -421,27 +470,52 @@ class Transformer(object):
         '''
         
         pipe_audio = None
-        sample_rate = 44100
         if isinstance(input_audio, str):
             file_info.validate_input_file(input_audio)
             input_filepath = input_audio
         else:
-            if len(input_audio.shape) !=2:
-                raise ValueError('In pipe_audio mode, audio is expected in the form nsamples x nchannels.')
-            pipe_audio = BytesIO()
-            wavfile.write( pipe_audio, sample_rate, np.array(np.array(input_audio), dtype=np.float32) )
+            # we are using pipe for input/output
+            
             input_filepath = '-'
             output_filepath = '-'
+            
+                    
+            # tests for input / output formats
+            self.pipe_check_audio_formats( self.pipe_audio_format_input )
+            self.pipe_check_audio_formats( self.pipe_audio_format_output )
+            
+            if len(input_audio.shape) == 1 and self.pipe_audio_format_input['channels'] == 1:
+                input_audio = input_audio[:,None]
+            elif len(input_audio.shape) == 2 and self.pipe_audio_format_input['channels'] == input_audio.shape[1]:
+                pass
+            elif len(input_audio.shape) >2:
+                raise ValueError('In pipe_audio mode, audio is expected in the form nsamples x nchannels.')
 
-        if output_filepath is not None:
-            file_info.validate_output_file(output_filepath)
-        else:
-            output_filepath = '-n'
+            # determine data type
+            in_type = self.pipe_get_audio_encoding(self.pipe_audio_format_input)
 
-        if pipe_audio is not None and (input_audio == output_filepath):
-            raise ValueError(
-                "input_filepath must be different from output_filepath."
-            )
+            pipe_audio = BytesIO()
+            # write audio to wav/raw pipe
+            if self.pipe_audio_format_input['file_type'] == 'wav':
+                wavfile.write( pipe_audio, self.pipe_audio_format_input['rate'], np.array(np.array(input_audio), dtype=in_type) )
+                
+            elif self.pipe_audio_format_input['file_type'] == 'raw': 
+                pipe_audio.write(np.array(input_audio,dtype = in_type).tobytes())
+                pipe_audio.seek(0)
+                
+            else:
+                raise NotImplementedError('Audio format not implemented for piping. Provide a string for input_audio if you want to write to a file instead.')
+
+        if pipe_audio is None:
+            if output_filepath is not None:
+                file_info.validate_output_file(output_filepath)
+            else:
+                output_filepath = '-n'
+
+            if (input_audio == output_filepath):
+                raise ValueError(
+                    "input_filepath must be different from output_filepath."
+                )
 
         args = []
         args.extend(self.globals)
@@ -468,10 +542,23 @@ class Transformer(object):
                 output_filepath,
                 " ".join(self.effects_log)
             )
+            
+            # read from pipe
             if pipe_audio is not None:
+                out_type = self.pipe_get_audio_encoding(self.pipe_audio_format_output)
+
                 output_wav_stream = BytesIO(out)
-                sample_rate_out, out = wavfile.read(output_wav_stream)
+                # convert output audio to python object
+                if self.pipe_audio_format_output['file_type'] == 'wav':
+                    sample_rate_out, out = wavfile.read(output_wav_stream)
                 
+                elif self.pipe_audio_format_output['file_type'] == 'raw': 
+                    out=np.fromstring(output_wav_stream.read(), dtype=out_type)
+                    
+                else:
+                    raise NotImplementedError('Audio format not implemented for piping. Provide a string for input_audio if you want to write to a file instead.')
+            
+            # read metadata for write to file 
             elif out is not None:
                 logger.info("[SoX] {}".format(out))
                 

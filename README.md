@@ -101,22 +101,33 @@ cbn.build(
 
 Edit audio without writing to disk (piped):
 ```python
+import numpy as np
 from scipy.io import wavfile
 import sox 
 
 # load audio
-fs,u = wavfile.read('right.wav') 
-# channel layout format
-u = u[:,None] 
+fs,audio = wavfile.read('right.wav') 
+n_channels = int(len(audio.shape) == 1 or audio.shape[1])
+encoding = 'floating_point' if (np.amax(np.abs(audio)) < 1.5) else 'signed-integer'
+
 # create trasnformer 
 tfm = sox.Transformer() 
 # compression
-tfm.compand() 
+# tfm.compand() 
 
 # set formats to .wav and signed-integer 
-tfm.set_output_format(file_type='wav')
-tfm.set_input_format(file_type='wav', encoding='signed-integer') 
+tfm.set_output_format(file_type='raw', 
+                        encoding=encoding,
+                        bits=32,
+                        rate=fs,
+                        channels = n_channels)
+                        
+tfm.set_input_format(file_type='raw', 
+                        encoding=encoding,
+                        bits=32,
+                        rate=fs,
+                        channels = n_channels) 
 
-x , audio_out, u = tfm.build(u,None,return_output=True)
+x , audio_out, info_str = tfm.build(audio,None,return_output=True)
 
 ```
