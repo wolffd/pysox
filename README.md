@@ -99,7 +99,8 @@ cbn.build(
 
 ```
 
-Edit audio without writing to disk (piped):
+Apply sox without writing to disk (piped):
+NB: Tested only on linux/debian/ubuntu
 ```python
 import numpy as np
 from scipy.io import wavfile
@@ -128,6 +129,6 @@ tfm.set_input_format(file_type='raw',
                         rate=fs,
                         channels = n_channels) 
 
-x , audio_out, info_str = tfm.build(audio,None,return_output=True)
+status, audio_out, info_str = tfm.build(audio,None,return_output=True)
 
 ```
